@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch.nn.functional as F
 
 class Conv2d_BatchNorm_ReLU(nn.Module):
     def __init__(self, in_channels, n_filters, k_size, stride, padding, bias=True):
@@ -14,3 +15,12 @@ class Conv2d_BatchNorm_ReLU(nn.Module):
         return self.relu(x)
 
 
+class CrossEntropyLoss2d(nn.Module):
+
+    def __init__(self, weight=None, average=False):
+        super().__init__()
+
+        self.loss = nn.NLLLoss2d(weight, size_average=average)
+
+    def forward(self, outputs, targets):
+        return self.loss(F.log_softmax(outputs), targets)

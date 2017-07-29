@@ -6,7 +6,7 @@ from models import modules
 
 class SegNet_VGG16(nn.Module):
 
-    def __init__(self, n_classes=21, n_channels=3, pretrained=True, use_cuda=True):
+    def __init__(self, n_classes=21, n_channels=3, pretrained=True):
         """
         Init parameters are default set to match PASCAL VOC dataset
 
@@ -19,18 +19,12 @@ class SegNet_VGG16(nn.Module):
         super().__init__()
         self.n_classes = n_classes
         self.n_channels = n_channels
-        self.use_cuda = use_cuda
 
         self.encoder = SegNet_VGG16_encoder(n_channels)
         self.decoder = SegNet_VGG16_decoder(n_classes)
 
         if pretrained:
             self.load_vgg16()
-
-
-        self.model = nn.Sequential(self.encoder, self.decoder)
-        if self.use_cuda:
-            self.model = self.model.cuda()
 
     def load_vgg16(self):
         layers = list(models.vgg16(pretrained=True).features.children())
@@ -42,7 +36,10 @@ class SegNet_VGG16(nn.Module):
                 index += 1
 
     def forward(self, x):
-        return self.model(x)
+        encoded, indices = self.encoder(x)
+        segmented = self.decoder(encoded, indices)
+
+        return segmented
 
 class SegNet_VGG16_encoder(nn.Module):
     def __init__(self, in_channels):
@@ -156,7 +153,7 @@ class SegNet_VGG16_decoder(nn.Module):
         # reuse -> self.unpool
         self.conv2_64_to_64 = modules.Conv2d_BatchNorm_ReLU(64, 64, 3, 1, 1)
         # TODO should there be ReLU at the end of file?
-        self.conv1_64_to_n_classes = modules.Conv2d_BatchNorm_ReLU(64, n_classes, 3, 1, 1)
+        self.final = nn.Conv2d(64, n_classes, kernel_size=3, padding=1, stride=1, bias=True)
 
     def forward(self, x, indices):
         i5, i4, i3, i2, i1 = indices
@@ -187,7 +184,7 @@ class SegNet_VGG16_decoder(nn.Module):
         # First block 64 -> n_classes
         x = self.unpool(x, indices=i1)
         x = self.conv2_64_to_64(x)
-        x = self.conv1_64_to_n_classes(x)
+        x = self.final(x)
 
         return x
 
