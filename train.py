@@ -1,31 +1,30 @@
 import argparse
 
+import numpy as np
 import torch
 import visdom
-import numpy as np
 from torch.autograd import Variable
 from torch.utils import data
 from tqdm import tqdm
 
-
 from datasets.VOC import pascalVOCLoader
 from models.SegNet import SegNet_VGG16
-from models.modules import CrossEntropyLoss2d
+from models.modules import cross_entropy2d
 
 
 def train(args):
     # Setup data for training
     train_loader = pascalVOCLoader('/home/pkovacs/Documents/data/VOCdevkit/VOC2012', is_transform=True, split='train')
-    train_data = data.DataLoader(train_loader, batch_size=args.batch_size, num_workers=5, shuffle=True)
+    train_data = data.DataLoader(train_loader, batch_size=args.batch_size, num_workers=4, shuffle=True)
     CLASSES = train_loader.n_classes
 
     # Setup validation data
     val_loader = pascalVOCLoader('/home/pkovacs/Documents/data/VOCdevkit/VOC2012', is_transform=True, split='val')
-    val_data = data.DataLoader(val_loader, batch_size=args.batch_size, num_workers=5, shuffle=True)
+    val_data = data.DataLoader(val_loader, batch_size=args.batch_size, num_workers=4, shuffle=True)
 
     # Setup visdom for visualization
-    vis = visdom.Visdom()
-    loss_window = vis.line(X=torch.zeros((1,)).cpu(),
+    viz = visdom.Visdom()
+    loss_window = viz.line(X=torch.zeros((1,)).cpu(),
                            Y=torch.zeros((1)).cpu(),
                            env="loss",
                            opts=dict(xlabel='minibatches',
@@ -37,7 +36,7 @@ def train(args):
     model = SegNet_VGG16(n_classes=CLASSES, n_channels=3, pretrained=True)
 
     # Optimizer
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.l_rate, weight_decay=5e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.l_rate, weight_decay=5e-4)
 
     # Loss Function
     # TODO add weights for classes
@@ -47,13 +46,10 @@ def train(args):
     # If cuda (GPU) device available compute on it
     if torch.cuda.is_available():
         model.cuda()
-        loss_fun = CrossEntropyLoss2d(weight=weight.cuda(), average=True)
-    else:
-        loss_fun = CrossEntropyLoss2d(weight=weight)
 
     for epoch in range(args.n_epoch):
         print("Epoch {}/{}:".format(epoch, args.n_epoch))
-        for i, (images, labels) in enumerate(train_data):
+        for i, (images, labels) in tqdm(enumerate(train_data), desc="Epoch"):
             if torch.cuda.is_available():
                 images = Variable(images.cuda())
                 labels = Variable(labels.cuda())
@@ -65,7 +61,7 @@ def train(args):
             outputs = model(images)
 
             # Compute loss function
-            loss = loss_fun(outputs, labels)
+            loss = cross_entropy2d(outputs, labels)  # loss_fun(outputs, labels)
 
             # Before the backward pass, use the optimizer object to zero all of the gradients
             # for the variables it will update (which are the learnable weights of the model)
@@ -77,21 +73,19 @@ def train(args):
             # Calling the step function on an Optimizer makes an update to its parameters
             optimizer.step()
 
-            it = len(train_loader) * epoch + i
+            it = (len(train_data) * epoch) + i
 
-            # Visualise train loss function
-            print(np.array([it]))
-            print(np.array([loss.data[0]]))
-            vis.updateTrace(
-                X=np.array([it]),
-                Y=np.array([loss.data[0]]),
-                env="loss",
-                win=loss_window,
-                name='Train')
-
-            # Log image results and validation
+            # Send train and validations losses to Visdom and display them
             if it % args.log_freq == 0:
-                print("VALIDATION")
+
+                # Visualise train loss function
+                viz.updateTrace(
+                    X=np.array([it]),
+                    Y=np.array([loss.data[0]]),
+                    env="loss",
+                    win=loss_window,
+                    name='Train')
+
                 validation_losses = []
                 for images, labels in val_data:
                     if torch.cuda.is_available():
@@ -102,23 +96,55 @@ def train(args):
                         images = Variable(images, volatile=True)
                         labels = Variable(labels, volatile=True)
                     outputs = model(images)
-                    val_loss = loss_fun(outputs, labels)
+                    val_loss = cross_entropy2d(outputs, labels)  # loss_fun(outputs, labels)
                     validation_losses.append(val_loss.data[0])
                     break
 
-                print(np.array([it]))
-                print(np.array([np.mean(validation_losses)]))
                 # Visualise val loss function
-                vis.updateTrace(
+                viz.updateTrace(
                     X=np.array([it]),
                     Y=np.array([np.mean(validation_losses)]),
                     env="loss",
                     win=loss_window,
                     name='Validation')
 
+        # VISUALIZE IMAGES AFTER EACH EPOCH
+        for i, (images, labels) in enumerate(val_data):
+            if torch.cuda.is_available():
+                images = Variable(images.cuda(), volatile=True)
+                labels = Variable(labels.cuda(), volatile=True)
+            else:
+                images = Variable(images, volatile=True)
+                labels = Variable(labels, volatile=True)
+            outputs = model(images)
 
-                # TODO visualise images
+            if images.is_cuda:
+                images = images.cpu()
+                labels = labels.cpu()
+            if isinstance(images, Variable):
+                images = images.data
+                labels = labels.data
+            images = images.numpy()
+            labels = labels.numpy()
 
+            for j, img in enumerate(images):
+                # Real image
+                viz.image(img, env='epoch_{}'.format(epoch), opts=dict(caption='Image_{}'.format(j)))
+
+                # Ground truth segmentation
+                decoded_label = np.transpose(val_loader.decode_segmap(labels[j]), [2,0,1])
+                viz.image(decoded_label, env='epoch_{}'.format(epoch), opts=dict(caption='GT_{}'.format(j)))
+
+                # Predicted segmentation
+                out_img = np.transpose(train_loader.decode_segmap(outputs[j].cpu().data.numpy().argmax(0)), [2,0,1])
+                viz.image(out_img, env='epoch_{}'.format(epoch), opts=dict(caption='Predicted_{}'.format(j)))
+
+            # We dont want all validation images so stop if we have more than 10
+            if i * args.batch_size >= 10:
+                break
+
+        # Save model to disk
+        torch.save(model, "segnet_VOC_epoch_{}.pkl".format(epoch))
 
 
 if __name__ == '__main__':
@@ -131,7 +157,7 @@ if __name__ == '__main__':
                         help='Learning Rate')
     parser.add_argument('--port', type=int, default=8097,
                         help='Port for Visdom server -> result logging')
-    parser.add_argument('--log_freq', type=int, default=20,
+    parser.add_argument('--log_freq', type=int, default=10,
                         help='Frequency of logging of segmentation results to Visdom.')
     args = parser.parse_args()
     train(args)
