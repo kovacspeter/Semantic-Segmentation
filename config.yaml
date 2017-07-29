@@ -1,0 +1,3 @@
+datasets:
+  pascal: "../../data//VOCdevkit/VOC2012/"
+  sbd: "../../data/benchmark_RELEASE/"
