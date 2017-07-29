@@ -39,13 +39,12 @@ def train(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.l_rate, weight_decay=5e-4)
 
     # Loss Function
-    # TODO add weights for classes
-    weight = torch.ones(CLASSES)
-    weight[0] = 0
+    weight = torch.FloatTensor(train_loader.class_weights)
 
     # If cuda (GPU) device available compute on it
     if torch.cuda.is_available():
         model.cuda()
+        weight = weight.cuda()
 
     for epoch in range(args.n_epoch):
         print("Epoch {}/{}:".format(epoch, args.n_epoch))
@@ -61,7 +60,7 @@ def train(args):
             outputs = model(images)
 
             # Compute loss function
-            loss = cross_entropy2d(outputs, labels)  # loss_fun(outputs, labels)
+            loss = cross_entropy2d(outputs, labels, weight=weight)  # loss_fun(outputs, labels)
 
             # Before the backward pass, use the optimizer object to zero all of the gradients
             # for the variables it will update (which are the learnable weights of the model)
@@ -96,7 +95,7 @@ def train(args):
                         images = Variable(images, volatile=True)
                         labels = Variable(labels, volatile=True)
                     outputs = model(images)
-                    val_loss = cross_entropy2d(outputs, labels)  # loss_fun(outputs, labels)
+                    val_loss = cross_entropy2d(outputs, labels, weight=weight)  # loss_fun(outputs, labels)
                     validation_losses.append(val_loss.data[0])
                     break
 

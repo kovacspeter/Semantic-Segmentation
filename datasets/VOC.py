@@ -38,6 +38,29 @@ class pascalVOCLoader(data.Dataset):
         else:
             self.setup(pre_encode=False)
 
+        self.class_weights = self._get_class_weigth_vector()
+
+    def _get_class_weigth_vector(self):
+        label_counts = np.zeros(21)
+        weights = np.zeros(21)
+        for img_name in self.files[self.split]:
+            lbl_path = self.root + '/SegmentationClass/pre_encoded/' + img_name + '.png'
+            lbl = m.imread(lbl_path)
+            lbl = np.array(lbl, dtype=np.int32)
+
+            unique, counts = np.unique(lbl, return_counts=True)
+            for i, c in zip(unique, counts):
+                label_counts[i] += c
+        label_counts = label_counts[1:]
+        label_counts /= sum(label_counts)
+
+        label_counts = 1/label_counts / sum(1/label_counts)
+
+        for i, c in enumerate(label_counts):
+            weights[i+1] = c
+
+        return weights*100
+
     def __len__(self):
         return len(self.files[self.split])
 
