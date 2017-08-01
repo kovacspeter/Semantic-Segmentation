@@ -1,3 +1,4 @@
 datasets:
-  pascal: "../../data//VOCdevkit/VOC2012/"
-  sbd: "../../data/benchmark_RELEASE/"
+  pascal: "../../data/VOCdevkit/VOC2012/"
+  sbd: "../../data/VOCdevkit/benchmark_RELEASE/"
+  ade20k: "../../data/ADEChallengeData2016/"

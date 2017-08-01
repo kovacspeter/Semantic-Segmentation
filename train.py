@@ -26,7 +26,6 @@ def train(args):
     viz = visdom.Visdom()
     loss_window = viz.line(X=torch.zeros((1,)).cpu(),
                            Y=torch.zeros((1)).cpu(),
-                           env="loss",
                            opts=dict(xlabel='minibatches',
                                      ylabel='Loss',
                                      title='Loss',
@@ -40,6 +39,8 @@ def train(args):
 
     # Loss Function
     weight = torch.FloatTensor(train_loader.class_weights)
+    # weight = torch.ones(21)
+    # weight[0] = 0
 
     # If cuda (GPU) device available compute on it
     if torch.cuda.is_available():
@@ -81,12 +82,11 @@ def train(args):
                 viz.updateTrace(
                     X=np.array([it]),
                     Y=np.array([loss.data[0]]),
-                    env="loss",
                     win=loss_window,
                     name='Train')
 
                 validation_losses = []
-                for images, labels in val_data:
+                for i2, (images, labels) in enumerate(val_data):
                     if torch.cuda.is_available():
                         # volatile means that you will not compute backward pass - only inference
                         images = Variable(images.cuda(), volatile=True)
@@ -97,13 +97,14 @@ def train(args):
                     outputs = model(images)
                     val_loss = cross_entropy2d(outputs, labels, weight=weight)  # loss_fun(outputs, labels)
                     validation_losses.append(val_loss.data[0])
-                    break
+
+                    if i2 * args.batch_size > 50:
+                        break
 
                 # Visualise val loss function
                 viz.updateTrace(
                     X=np.array([it]),
                     Y=np.array([np.mean(validation_losses)]),
-                    env="loss",
                     win=loss_window,
                     name='Validation')
 
@@ -128,6 +129,10 @@ def train(args):
 
             for j, img in enumerate(images):
                 # Real image
+                img = img.transpose(1, 2, 0)
+                img *= [0.229, 0.224, 0.225]
+                img += [0.485, 0.456, 0.406]
+                img = img.transpose(2, 0, 1)
                 viz.image(img, env='epoch_{}'.format(epoch), opts=dict(caption='Image_{}'.format(j)))
 
                 # Ground truth segmentation

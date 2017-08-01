@@ -27,12 +27,16 @@ class SegNet_VGG16(nn.Module):
             self.load_vgg16()
 
     def load_vgg16(self):
-        layers = list(models.vgg16(pretrained=True).features.children())
+        layers = list(models.vgg16_bn(pretrained=True).features.children())
         index = 0
+
         for layer in layers:
             if isinstance(layer, nn.Conv2d):
                 self.encoder.layers[index].conv.weight.data = layer.weight.data
                 self.encoder.layers[index].conv.bias.data = layer.bias.data
+            elif isinstance(layer, nn.BatchNorm2d):
+                self.encoder.layers[index].bn.weight.data = layer.weight.data
+                self.encoder.layers[index].bn.bias.data = layer.bias.data
                 index += 1
 
     def forward(self, x):

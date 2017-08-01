@@ -12,12 +12,6 @@ from tqdm import tqdm
 from torch.utils import data
 import yaml
 
-def get_data_path(name):
-    with open("config.yaml", 'r') as stream:
-        config = yaml.load(stream)
-    return config['datasets'][name]
-
-
 class pascalVOCLoader(data.Dataset):
     def __init__(self, root, split="train_aug", is_transform=False, img_size=512):
         self.root = root
@@ -25,7 +19,6 @@ class pascalVOCLoader(data.Dataset):
         self.is_transform = is_transform
         self.n_classes = 21
         self.img_size = img_size if isinstance(img_size, tuple) else (img_size, img_size)
-        self.mean = np.array([104.00699, 116.66877, 122.67892])
         self.files = collections.defaultdict(list)
 
         for split in ["train", "val", "trainval"]:
@@ -51,15 +44,14 @@ class pascalVOCLoader(data.Dataset):
             unique, counts = np.unique(lbl, return_counts=True)
             for i, c in zip(unique, counts):
                 label_counts[i] += c
-        label_counts = label_counts[1:]
         label_counts /= sum(label_counts)
 
-        label_counts = 1/label_counts / sum(1/label_counts)
+        label_counts = (1/label_counts) / sum(1/label_counts)
 
         for i, c in enumerate(label_counts):
-            weights[i+1] = c
-
-        return weights*100
+            weights[i] = c
+        weights[0] = 0.005
+        return weights
 
     def __len__(self):
         return len(self.files[self.split])
@@ -81,19 +73,34 @@ class pascalVOCLoader(data.Dataset):
         return img, lbl
 
     def transform(self, img, lbl):
-        img = img[:, :, ::-1]
         img = img.astype(np.float64)
-        img -= self.mean
-        img = m.imresize(img, (self.img_size[0], self.img_size[1]))
-        # Resize scales images from 0 to 255, thus we need
-        # to divide by 255.0
+        if lbl.shape[0] < 256 or lbl.shape[1] < 256:
+            img = m.imresize(img, (self.img_size[0], self.img_size[1]))
+            lbl = m.imresize(lbl, (self.img_size[0], self.img_size[1]), 'nearest', mode='F')
+
+        # random 256x256 crop
+        width, height, _ = img.shape
+        max_width_crop = width - 256
+        max_height_crop = height - 256
+        c, r = np.random.randint(0, max_width_crop), np.random.randint(0, max_height_crop)
+        img = img[c:c+256, r:r+256, :]
+
+        # img = m.imresize(img, (self.img_size[0], self.img_size[1]))
+
         img = img.astype(float) / 255.0
+
+        # mean subtraction etc...
+        img -= [0.485, 0.456, 0.406]
+        img /= [0.229, 0.224, 0.225]
+
         # NHWC -> NCWH
         img = img.transpose(2, 0, 1)
 
         lbl[lbl == 255] = 0
         lbl = lbl.astype(float)
-        lbl = m.imresize(lbl, (self.img_size[0], self.img_size[1]), 'nearest', mode='F')
+        lbl = lbl[c:c+256, r:r+256]
+
+        # lbl = m.imresize(lbl, (self.img_size[0], self.img_size[1]), 'nearest', mode='F')
         lbl = lbl.astype(int)
 
         img = torch.from_numpy(img).float()
@@ -135,8 +142,7 @@ class pascalVOCLoader(data.Dataset):
             return rgb
 
     def setup(self, pre_encode=False):
-        sbd_path = get_data_path('sbd')
-        voc_path = get_data_path('pascal')
+        sbd_path = self.root + '/../benchmark_RELEASE/'
 
         target_path = self.root + '/SegmentationClass/pre_encoded/'
         if not os.path.exists(target_path):
@@ -163,7 +169,7 @@ class pascalVOCLoader(data.Dataset):
 
 
 if __name__ == '__main__':
-    local_path = '../../data/VOCdevkit/VOC2012'
+    local_path = '../../../data/VOCdevkit/VOC2012/'
     dst = pascalVOCLoader(local_path, is_transform=True)
     trainloader = data.DataLoader(dst, batch_size=4)
     for i, data in enumerate(trainloader):
